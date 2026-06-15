@@ -1,0 +1,8 @@
+2026-06-10 16:55:21,310 DEBUG api\main.py:81 - Building agents for API server...
+2026-06-10 16:55:21,319 DEBUG agent_verse\chat_agent\agent.py:45 - Initializing [🤖] chat_agent
+2026-06-10 16:55:25,314 DEBUG agent_verse\merchant_insight_agent\agent.py:56 - Initializing [🤖] merchant_insight_agent
+2026-06-10 16:55:29,075 DEBUG api\main.py:84 - Agents ready.
+2026-06-10 17:10:40,884 DEBUG api\main.py:81 - Building agents for API server...
+2026-06-10 17:10:40,892 DEBUG agent_verse\chat_agent\agent.py:45 - Initializing [🤖] chat_agent
+2026-06-10 17:10:44,471 DEBUG agent_verse\merchant_insight_agent\agent.py:56 - Initializing [🤖] merchant_insight_agent
+2026-06-10 17:10:47,577 DEBUG api\main.py:84 - Agents ready.

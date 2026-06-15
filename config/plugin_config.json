@@ -1,0 +1,7 @@
+[
+    {
+        "db_plugin": {
+            "sse_server_url": "http://localhost:9002/sse"
+        }
+    }
+]

@@ -1,0 +1,11 @@
+semantic-kernel[mcp]>=1.43.0
+openai>=2.0.0
+mcp
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+python-docx
+psycopg2-binary
+truststore
+PyJWT>=2.8.0

@@ -1,0 +1,20 @@
+2026-06-11 12:32:44,080 DEBUG api\main.py:40 - Building agents for API server...
+2026-06-11 12:32:44,099 DEBUG agent_verse\chat_agent\agent.py:74 - Initializing [🤖] chat_agent
+2026-06-11 12:32:47,557 DEBUG agent_verse\merchant_insight_agent\agent.py:71 - Initializing [🤖] merchant_insight_agent
+2026-06-11 12:32:50,749 DEBUG agent_verse\orchestrator_agent\agent.py:203 - Initializing [🤖] orchestrator_agent
+2026-06-11 12:32:51,156 DEBUG api\main.py:54 - All agents ready (Orchestrator + Merchant Insight + Chat).
+2026-06-11 13:23:56,513 DEBUG api\main.py:40 - Building agents for API server...
+2026-06-11 13:23:56,557 DEBUG agent_verse\chat_agent\agent.py:74 - Initializing [🤖] chat_agent
+2026-06-11 13:23:59,419 DEBUG agent_verse\merchant_insight_agent\agent.py:71 - Initializing [🤖] merchant_insight_agent
+2026-06-11 13:24:01,502 DEBUG agent_verse\orchestrator_agent\agent.py:203 - Initializing [🤖] orchestrator_agent
+2026-06-11 13:24:02,309 DEBUG api\main.py:54 - All agents ready (Orchestrator + Merchant Insight + Chat).
+2026-06-11 13:28:31,412 DEBUG api\main.py:40 - Building agents for API server...
+2026-06-11 13:28:31,425 DEBUG agent_verse\chat_agent\agent.py:74 - Initializing [🤖] chat_agent
+2026-06-11 13:28:36,483 DEBUG agent_verse\merchant_insight_agent\agent.py:71 - Initializing [🤖] merchant_insight_agent
+2026-06-11 13:28:40,890 DEBUG agent_verse\orchestrator_agent\agent.py:203 - Initializing [🤖] orchestrator_agent
+2026-06-11 13:28:42,772 DEBUG api\main.py:54 - All agents ready (Orchestrator + Merchant Insight + Chat).
+2026-06-11 17:31:57,963 DEBUG api\main.py:40 - Building agents for API server...
+2026-06-11 17:31:58,001 DEBUG agent_verse\chat_agent\agent.py:74 - Initializing [🤖] chat_agent
+2026-06-11 17:32:03,545 DEBUG agent_verse\merchant_insight_agent\agent.py:71 - Initializing [🤖] merchant_insight_agent
+2026-06-11 17:32:07,160 DEBUG agent_verse\orchestrator_agent\agent.py:203 - Initializing [🤖] orchestrator_agent
+2026-06-11 17:32:08,704 DEBUG api\main.py:54 - All agents ready (Orchestrator + Merchant Insight + Chat).
