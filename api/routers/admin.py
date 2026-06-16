@@ -360,3 +360,91 @@ async def assign_role(
         "new_role": updated["role"],
         "message": "Role updated successfully",
     }
+
+
+# ── GET /admin/merchants ─────────────────────────────────────
+@router.get("/merchants")
+async def list_merchants(
+    user: dict = Depends(require_role("Admin")),
+    conn=Depends(get_db),
+):
+    """List all merchants in the system with their currently assigned DSP. Admin only."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT m.id, m.merchant_name, m.region, m.area, m.tier, m.category,
+               m.assigned_dsp_id, u.full_name AS assigned_dsp_name
+        FROM merchants m
+        LEFT JOIN users u ON u.id = m.assigned_dsp_id
+        ORDER BY m.merchant_name
+        """
+    )
+    rows = cur.fetchall()
+    return [
+        {
+            "merchant_id": str(r["id"]),
+            "merchant_name": r["merchant_name"],
+            "region": r["region"],
+            "area": r["area"],
+            "tier": r["tier"],
+            "category": r["category"],
+            "assigned_dsp_id": r["assigned_dsp_id"],
+            "assigned_dsp_name": r["assigned_dsp_name"],
+        }
+        for r in rows
+    ]
+
+
+# ── Request Models for Merchant Assignment ───────────────────
+class MerchantAssignRequest(BaseModel):
+    assigned_dsp_id: str
+
+
+# ── PATCH /admin/merchants/{id}/assign ───────────────────────
+@router.patch("/merchants/{merchant_id}/assign")
+async def assign_merchant(
+    merchant_id: str,
+    req: MerchantAssignRequest,
+    user: dict = Depends(require_role("Admin")),
+    conn=Depends(get_db),
+):
+    """Assign a merchant to a DSP. Admin only."""
+    cur = conn.cursor()
+    # verify DSP exists
+    cur.execute("SELECT id, full_name, role FROM users WHERE id = %s", (req.assigned_dsp_id,))
+    dsp = cur.fetchone()
+    if not dsp:
+        raise HTTPException(status_code=404, detail="DSP not found")
+    if dsp["role"] != "DSP":
+        raise HTTPException(status_code=400, detail="User is not a DSP")
+
+    cur.execute(
+        "UPDATE merchants SET assigned_dsp_id = %s, updated_at = NOW() WHERE id = %s RETURNING id, merchant_name",
+        (req.assigned_dsp_id, merchant_id),
+    )
+    updated = cur.fetchone()
+    if not updated:
+        conn.rollback()
+        raise HTTPException(status_code=404, detail="Merchant not found")
+    conn.commit()
+
+    # Audit log
+    try:
+        cur.execute(
+            """
+            INSERT INTO audit_logs (user_id, action, resource, resource_id, details)
+            VALUES (%s, 'ASSIGN_MERCHANT', 'merchant', %s, %s)
+            """,
+            (user["user_id"], merchant_id, json.dumps({"assigned_dsp_id": req.assigned_dsp_id, "dsp_name": dsp["full_name"]})),
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+    return {
+        "merchant_id": str(updated["id"]),
+        "merchant_name": updated["merchant_name"],
+        "assigned_dsp_id": req.assigned_dsp_id,
+        "message": "Merchant assigned successfully",
+    }
+
