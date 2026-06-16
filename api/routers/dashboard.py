@@ -41,7 +41,7 @@ async def dsp_dashboard(
             ON ds.merchant_id = m.id AND ds.score_date = CURRENT_DATE
         LEFT JOIN recommendations r
             ON r.merchant_id = m.id AND r.recommendation_date = CURRENT_DATE
-        WHERE m.assigned_dsp_id = %s::uuid
+        WHERE m.assigned_dsp_id = %s
           AND m.is_active = TRUE
         """,
         (user["user_id"],),
@@ -80,7 +80,7 @@ async def manager_dashboard(
         LEFT JOIN recommendations r
             ON r.merchant_id = m.id AND r.recommendation_date = CURRENT_DATE
         WHERE m.assigned_dsp_id IN (
-            SELECT id FROM users WHERE manager_id = %s::uuid OR id = %s::uuid
+            SELECT id FROM users WHERE manager_id = %s OR id = %s
         ) AND m.is_active = TRUE
         """,
         (user["user_id"], user["user_id"]),

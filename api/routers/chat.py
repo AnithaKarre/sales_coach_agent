@@ -70,7 +70,7 @@ async def ask_salescoach(
                     UPDATE chat_sessions
                     SET messages = messages || %s::jsonb,
                         updated_at = NOW()
-                    WHERE id = %s::uuid AND user_id = %s::uuid
+                    WHERE id = %s AND user_id = %s
                     RETURNING id
                     """,
                     (
@@ -93,7 +93,7 @@ async def ask_salescoach(
                 cur.execute(
                     """
                     INSERT INTO chat_sessions (user_id, title, messages)
-                    VALUES (%s::uuid, %s, %s::jsonb)
+                    VALUES (%s, %s, %s::jsonb)
                     RETURNING id
                     """,
                     (
@@ -139,7 +139,7 @@ async def chat_history(
         """
         SELECT id, title, messages, created_at, updated_at
         FROM chat_sessions
-        WHERE user_id = %s::uuid
+        WHERE user_id = %s
         ORDER BY updated_at DESC
         LIMIT %s
         """,

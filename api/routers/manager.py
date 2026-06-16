@@ -35,7 +35,7 @@ async def area_summary(
             """
             SELECT vas.*
             FROM v_area_summary vas
-            WHERE vas.region = (SELECT region FROM users WHERE id = %s::uuid)
+            WHERE vas.region = (SELECT region FROM users WHERE id = %s)
             ORDER BY vas.area
             """,
             (uid,),
@@ -65,7 +65,7 @@ async def area_summary(
             JOIN merchants m ON m.id = ds.merchant_id
             WHERE ds.score_date = CURRENT_DATE
               AND ds.priority_score >= 70
-              AND m.region = (SELECT region FROM users WHERE id = %s::uuid)
+              AND m.region = (SELECT region FROM users WHERE id = %s)
             """,
             (uid,),
         )
@@ -115,7 +115,7 @@ async def team_performance(
             SELECT vdp.*
             FROM v_dsp_performance vdp
             WHERE vdp.dsp_id IN (
-                SELECT id FROM users WHERE manager_id = %s::uuid
+                SELECT id FROM users WHERE manager_id = %s
             )
             ORDER BY vdp.completion_rate DESC NULLS LAST
             """,

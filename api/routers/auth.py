@@ -111,7 +111,7 @@ async def me(user: dict = Depends(get_current_user), conn=Depends(get_db)):
     """Return the current authenticated user's profile."""
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, email, full_name, role, region, area FROM users WHERE id = %s::uuid",
+        "SELECT id, email, full_name, role, region, area FROM users WHERE id = %s",
         (user["user_id"],),
     )
     row = cur.fetchone()

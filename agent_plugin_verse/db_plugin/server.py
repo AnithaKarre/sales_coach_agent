@@ -75,6 +75,7 @@ class MerchantDBPlugin:
     @mcp.tool()
     def get_merchant_details(merchant_name: str, user_id: str, user_role: str) -> str:
         """Fetches the profile details of a merchant by name, scoped to the caller's access. Requires user_id and user_role (DSP, Manager, or Admin)."""
+        clean_name = merchant_name.strip('\'" ')
         try:
             scope_sql, scope_params = MerchantDBPlugin._scope_clause(user_id, user_role)
             conn = MerchantDBPlugin._get_connection()
@@ -82,7 +83,7 @@ class MerchantDBPlugin:
             cur.execute(
                 f"SELECT id, merchant_name, region, area, tier, category, contact_number, address "
                 f"FROM merchants m WHERE merchant_name ILIKE %s AND {scope_sql} LIMIT 1",
-                [f"%{merchant_name}%", *scope_params],
+                [f"%{clean_name}%", *scope_params],
             )
             row = cur.fetchone()
             conn.close()
@@ -109,6 +110,7 @@ class MerchantDBPlugin:
     @mcp.tool()
     def get_merchant_score(merchant_name: str, user_id: str, user_role: str) -> str:
         """Fetches the daily priority score, rank, and signals of a merchant by name, scoped to the caller's access. Requires user_id and user_role."""
+        clean_name = merchant_name.strip('\'" ')
         try:
             scope_sql, scope_params = MerchantDBPlugin._scope_clause(user_id, user_role)
             conn = MerchantDBPlugin._get_connection()
@@ -121,7 +123,7 @@ class MerchantDBPlugin:
                 LEFT JOIN merchant_signals ms ON m.id = ms.merchant_id AND ms.signal_date = CURRENT_DATE
                 WHERE m.merchant_name ILIKE %s AND {scope_sql} LIMIT 1
                 ''',
-                [f"%{merchant_name}%", *scope_params],
+                [f"%{clean_name}%", *scope_params],
             )
             row = cur.fetchone()
             conn.close()
@@ -146,6 +148,7 @@ class MerchantDBPlugin:
     @mcp.tool()
     def get_merchant_recommendations(merchant_name: str, user_id: str, user_role: str) -> str:
         """Fetches the AI-generated recommended actions for a merchant by name, scoped to the caller's access. Requires user_id and user_role."""
+        clean_name = merchant_name.strip('\'" ')
         try:
             scope_sql, scope_params = MerchantDBPlugin._scope_clause(user_id, user_role)
             conn = MerchantDBPlugin._get_connection()
@@ -158,7 +161,7 @@ class MerchantDBPlugin:
                 WHERE m.merchant_name ILIKE %s AND r.recommendation_date = CURRENT_DATE AND {scope_sql}
                 ORDER BY r.confidence_score DESC
                 ''',
-                [f"%{merchant_name}%", *scope_params],
+                [f"%{clean_name}%", *scope_params],
             )
             rows = cur.fetchall()
             conn.close()
@@ -184,6 +187,7 @@ class MerchantDBPlugin:
     @mcp.tool()
     def get_merchant_visit_history(merchant_name: str, user_id: str, user_role: str) -> str:
         """Fetches the past visit history for a merchant by name, scoped to the caller's access. Requires user_id and user_role."""
+        clean_name = merchant_name.strip('\'" ')
         try:
             scope_sql, scope_params = MerchantDBPlugin._scope_clause(user_id, user_role)
             conn = MerchantDBPlugin._get_connection()
@@ -198,7 +202,7 @@ class MerchantDBPlugin:
                 ORDER BY v.visit_date DESC
                 LIMIT 5
                 ''',
-                [f"%{merchant_name}%", *scope_params],
+                [f"%{clean_name}%", *scope_params],
             )
             rows = cur.fetchall()
             conn.close()

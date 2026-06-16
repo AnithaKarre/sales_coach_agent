@@ -61,11 +61,11 @@ async def update_recommendation_status(
     elif role == "Manager":
         scope_sql = (
             "m.assigned_dsp_id IN "
-            "(SELECT id FROM users WHERE manager_id = %s::uuid OR id = %s::uuid)"
+            "(SELECT id FROM users WHERE manager_id = %s OR id = %s)"
         )
         scope_params = [uid, uid]
     else:
-        scope_sql = "m.assigned_dsp_id = %s::uuid"
+        scope_sql = "m.assigned_dsp_id = %s"
         scope_params = [uid]
 
     cur.execute(
@@ -73,9 +73,9 @@ async def update_recommendation_status(
         UPDATE recommendations r
         SET status = %s,
             status_updated_at = NOW(),
-            status_updated_by = %s::uuid
+            status_updated_by = %s
         FROM merchants m
-        WHERE r.id = %s::uuid
+        WHERE r.id = %s
           AND r.merchant_id = m.id
           AND {scope_sql}
         RETURNING r.id, r.status, r.status_updated_at
@@ -95,7 +95,7 @@ async def update_recommendation_status(
         cur.execute(
             """
             INSERT INTO audit_logs (user_id, action, resource, resource_id, details)
-            VALUES (%s::uuid, %s, %s, %s::uuid, %s::jsonb)
+            VALUES (%s, %s, %s, %s, %s::jsonb)
             """,
             (
                 uid,

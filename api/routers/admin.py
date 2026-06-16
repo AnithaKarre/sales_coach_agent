@@ -142,7 +142,7 @@ async def create_user(
     cur.execute(
         """
         INSERT INTO audit_logs (user_id, action, resource, resource_id, details)
-        VALUES (%s::uuid, 'CREATE_USER', 'user', %s, %s::jsonb)
+        VALUES (%s, 'CREATE_USER', 'user', %s, %s::jsonb)
         """,
         (user["user_id"], str(new_user["id"]), json.dumps({"email": req.email, "role": req.role})),
     )
@@ -184,7 +184,7 @@ async def update_user(
         fields.append("area = %s")
         params.append(req.area)
     if req.manager_id is not None:
-        fields.append("manager_id = %s::uuid")
+        fields.append("manager_id = %s")
         params.append(req.manager_id)
     if req.is_active is not None:
         fields.append("is_active = %s")
@@ -198,7 +198,7 @@ async def update_user(
     params.append(user_id)
 
     cur.execute(
-        f"UPDATE users SET {set_clause} WHERE id = %s::uuid RETURNING id, full_name, email, role, is_active",
+        f"UPDATE users SET {set_clause} WHERE id = %s RETURNING id, full_name, email, role, is_active",
         params,
     )
     updated = cur.fetchone()
@@ -227,7 +227,7 @@ async def deactivate_user(
     """Soft-delete (deactivate) a user. Admin only."""
     cur = conn.cursor()
     cur.execute(
-        "UPDATE users SET is_active = FALSE, updated_at = NOW() WHERE id = %s::uuid RETURNING id, full_name",
+        "UPDATE users SET is_active = FALSE, updated_at = NOW() WHERE id = %s RETURNING id, full_name",
         (user_id,),
     )
     deleted = cur.fetchone()
@@ -241,7 +241,7 @@ async def deactivate_user(
     cur.execute(
         """
         INSERT INTO audit_logs (user_id, action, resource, resource_id, details)
-        VALUES (%s::uuid, 'DEACTIVATE_USER', 'user', %s::uuid, %s::jsonb)
+        VALUES (%s, 'DEACTIVATE_USER', 'user', %s, %s::jsonb)
         """,
         (user["user_id"], user_id, json.dumps({"deactivated_user": deleted["full_name"]})),
     )
@@ -319,7 +319,7 @@ async def assign_role(
 
     cur = conn.cursor()
     cur.execute(
-        "SELECT role FROM users WHERE id = %s::uuid",
+        "SELECT role FROM users WHERE id = %s",
         (user_id,),
     )
     existing = cur.fetchone()
@@ -328,7 +328,7 @@ async def assign_role(
 
     old_role = existing["role"]
     cur.execute(
-        "UPDATE users SET role = %s, updated_at = NOW() WHERE id = %s::uuid RETURNING id, full_name, role",
+        "UPDATE users SET role = %s, updated_at = NOW() WHERE id = %s RETURNING id, full_name, role",
         (req.role, user_id),
     )
     updated = cur.fetchone()
@@ -338,7 +338,7 @@ async def assign_role(
     cur.execute(
         """
         INSERT INTO audit_logs (user_id, action, resource, resource_id, details)
-        VALUES (%s::uuid, 'ROLE_CHANGE', 'user', %s::uuid, %s::jsonb)
+        VALUES (%s, 'ROLE_CHANGE', 'user', %s, %s::jsonb)
         """,
         (
             user["user_id"],

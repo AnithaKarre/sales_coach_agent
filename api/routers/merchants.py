@@ -5,7 +5,7 @@ GET /api/v1/merchants/{merchant_id}/detail          → Merchant detail (SQL)
 GET /api/v1/merchants/{merchant_id}/history         → Merchant visit history
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from api.database import get_db
 from api.dependencies import get_current_user, require_role
 
@@ -20,10 +20,10 @@ def _scope_clause(role: str, user_id: str):
     if role == "Manager":
         return (
             "m.assigned_dsp_id IN "
-            "(SELECT id FROM users WHERE manager_id = %s::uuid OR id = %s::uuid)",
+            "(SELECT id FROM users WHERE manager_id = %s OR id = %s)",
             [user_id, user_id],
         )
-    return "m.assigned_dsp_id = %s::uuid", [user_id]
+    return "m.assigned_dsp_id = %s", [user_id]
 
 
 async def _invoke_insight_agent(app_state, merchant_name: str, mode: str, user_id: str, user_role: str) -> str:
@@ -60,11 +60,11 @@ async def prioritized_merchants(
     elif role == "Manager":
         scope_sql = (
             "m.assigned_dsp_id IN "
-            "(SELECT id FROM users WHERE manager_id = %s::uuid OR id = %s::uuid)"
+            "(SELECT id FROM users WHERE manager_id = %s OR id = %s)"
         )
         scope_params = [uid, uid]
     else:
-        scope_sql = "m.assigned_dsp_id = %s::uuid"
+        scope_sql = "m.assigned_dsp_id = %s"
         scope_params = [uid]
 
     cur.execute(
@@ -134,12 +134,28 @@ async def merchant_detail(
         f"""
         SELECT m.id, m.merchant_name, m.region, m.area, m.tier, m.category,
                m.contact_number, m.address, m.latitude, m.longitude,
-               m.onboarding_date, m.is_active, u.full_name AS assigned_dsp
+               m.onboarding_date, m.is_active, u.full_name AS assigned_dsp,
+               ds.priority_score,
+               r.recommended_action, r.status AS recommendation_status, r.id AS recommendation_id
         FROM merchants m
         LEFT JOIN users u ON u.id = m.assigned_dsp_id
-        WHERE m.id = %s::uuid AND {scope_sql}
+        LEFT JOIN (
+            SELECT priority_score
+            FROM daily_scores
+            WHERE merchant_id = %s
+            ORDER BY score_date DESC
+            LIMIT 1
+        ) ds ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT id, recommended_action, status
+            FROM recommendations
+            WHERE merchant_id = m.id
+            ORDER BY recommendation_date DESC, confidence_score DESC
+            LIMIT 1
+        ) r ON TRUE
+        WHERE m.id = %s AND {scope_sql}
         """,
-        [merchant_id, *scope_params],
+        [merchant_id, merchant_id, *scope_params],
     )
     merchant = cur.fetchone()
     if not merchant:
@@ -151,7 +167,7 @@ async def merchant_detail(
         SELECT transaction_volume, transaction_trend, days_since_visit,
                complaint_count, campaign_status, wallet_balance, active_products
         FROM merchant_signals
-        WHERE merchant_id = %s::uuid AND signal_date = CURRENT_DATE
+        WHERE merchant_id = %s AND signal_date = CURRENT_DATE
         """,
         (merchant_id,),
     )
@@ -172,6 +188,10 @@ async def merchant_detail(
             "onboarding_date": str(merchant["onboarding_date"]) if merchant["onboarding_date"] else None,
             "is_active": merchant["is_active"],
             "assigned_dsp": merchant["assigned_dsp"],
+            "priority_score": float(merchant["priority_score"]) if merchant["priority_score"] else None,
+            "recommendation": merchant["recommended_action"],
+            "recommendation_status": merchant["recommendation_status"],
+            "recommendation_id": str(merchant["recommendation_id"]) if merchant["recommendation_id"] else None,
         },
         "signals": {
             "transaction_volume": signals.get("transaction_volume"),
@@ -199,7 +219,7 @@ async def merchant_history(
     # verify access first
     scope_sql, scope_params = _scope_clause(user["role"], user["user_id"])
     cur.execute(
-        f"SELECT 1 FROM merchants m WHERE m.id = %s::uuid AND {scope_sql}",
+        f"SELECT 1 FROM merchants m WHERE m.id = %s AND {scope_sql}",
         [merchant_id, *scope_params],
     )
     if not cur.fetchone():
@@ -212,7 +232,7 @@ async def merchant_history(
                u.full_name AS visited_by
         FROM visit_history v
         JOIN users u ON u.id = v.dsp_id
-        WHERE v.merchant_id = %s::uuid
+        WHERE v.merchant_id = %s
         ORDER BY v.visit_date DESC
         """,
         (merchant_id,),
@@ -229,3 +249,75 @@ async def merchant_history(
         }
         for v in visits
     ]
+
+
+# ── POST /merchants/{merchant_id}/generate-brief ──────────────
+@router.post("/{merchant_id}/generate-brief")
+async def generate_merchant_brief(
+    merchant_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+    conn=Depends(get_db),
+):
+    """
+    Generate a live AI Coaching Brief for the merchant and save it as a new recommendation.
+    """
+    cur = conn.cursor()
+    # verify access and get merchant name
+    scope_sql, scope_params = _scope_clause(user["role"], user["user_id"])
+    cur.execute(
+        f"SELECT merchant_name FROM merchants m WHERE m.id = %s AND {scope_sql}",
+        [merchant_id, *scope_params],
+    )
+    merchant = cur.fetchone()
+    if not merchant:
+        raise HTTPException(status_code=404, detail="Merchant not found or access denied")
+
+    merchant_name = merchant["merchant_name"]
+    
+    # Invoke AI
+    brief_text = await _invoke_insight_agent(
+        request.app.state,
+        merchant_name,
+        "insight",
+        user["user_id"],
+        user["role"]
+    )
+
+    if not brief_text:
+        raise HTTPException(status_code=500, detail="Failed to generate AI brief.")
+
+    # Remove any existing brief generated to prevent duplicates and old cache issues
+    cur.execute(
+        "DELETE FROM recommendations WHERE merchant_id = %s",
+        (merchant_id,)
+    )
+
+    # Save to database
+    cur.execute(
+        """
+        INSERT INTO recommendations
+            (merchant_id, recommended_action, action_explanation,
+             confidence_score, status, recommendation_date,
+             status_updated_by, status_updated_at)
+        VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, CURRENT_TIMESTAMP)
+        RETURNING id, recommended_action, status
+        """,
+        (
+            merchant_id,
+            brief_text,
+            "Live generated AI brief.",
+            0.95,  # Arbitrary high confidence
+            "New",
+            user["user_id"]
+        )
+    )
+    new_rec = cur.fetchone()
+    conn.commit()
+
+    return {
+        "success": True,
+        "recommendation_id": str(new_rec["id"]),
+        "recommendation": new_rec["recommended_action"],
+        "status": new_rec["status"]
+    }

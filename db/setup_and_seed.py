@@ -76,18 +76,6 @@ STREET_NAMES = [
     "Marcos Highway", "Ortigas Ave.", "Shaw Blvd.", "Aurora Blvd."
 ]
 
-RECOMMENDATION_TEMPLATES = [
-    "Visit merchant within 24 hours  transaction volume has dropped {drop}% over the past week. Investigate root cause and discuss recovery plan.",
-    "Schedule a visit to discuss campaign enrollment. Merchant is currently inactive in all campaigns despite being a {tier} tier outlet.",
-    "Follow up on {complaints} unresolved complaints. Merchant satisfaction is at risk and may impact retention.",
-    "Merchant has not been visited in {days} days. Conduct a routine check-in to maintain relationship and assess current needs.",
-    "Discuss wallet top-up promotion. Current wallet balance is low at {balance}, which may be limiting transaction capacity.",
-    "Recommend product expansion  merchant currently has only {products} active products. Cross-sell GCash services.",
-    "Urgent: Transaction decline of {drop}% combined with {complaints} complaints. Prioritize this outlet for immediate visit.",
-    "Re-engage merchant on GCash campaign. Campaign status is 'Pending' for over 2 weeks with no activation.",
-    "Congratulate merchant on strong performance and discuss growth opportunities. Transaction volume is up {growth}%.",
-    "Assess merchant readiness for tier upgrade  consistent transaction growth over the past 30 days."
-]
 
 
 def hash_password(password: str) -> str:
@@ -105,9 +93,54 @@ def create_tables(conn):
     cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
     print("   OK pgvector extension enabled")
 
+    cur.execute("""
+        CREATE OR REPLACE FUNCTION gen_id(prefix TEXT, seq TEXT) RETURNS VARCHAR AS $$
+        DECLARE
+            v BIGINT;
+        BEGIN
+            v := nextval(seq);
+            IF v < 10 THEN
+                RETURN prefix || '0' || v::TEXT;
+            ELSE
+                RETURN prefix || v::TEXT;
+            END IF;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+
+
+    cur.execute("""
+        DROP SEQUENCE IF EXISTS users_id_seq CASCADE;
+        CREATE SEQUENCE users_id_seq START 1;
+        
+        DROP SEQUENCE IF EXISTS merchants_id_seq CASCADE;
+        CREATE SEQUENCE merchants_id_seq START 1;
+        
+        DROP SEQUENCE IF EXISTS merchant_signals_id_seq CASCADE;
+        CREATE SEQUENCE merchant_signals_id_seq START 1;
+        
+        DROP SEQUENCE IF EXISTS daily_scores_id_seq CASCADE;
+        CREATE SEQUENCE daily_scores_id_seq START 1;
+        
+        DROP SEQUENCE IF EXISTS recommendations_id_seq CASCADE;
+        CREATE SEQUENCE recommendations_id_seq START 1;
+        
+        DROP SEQUENCE IF EXISTS visit_history_id_seq CASCADE;
+        CREATE SEQUENCE visit_history_id_seq START 1;
+        
+        DROP SEQUENCE IF EXISTS audit_logs_id_seq CASCADE;
+        CREATE SEQUENCE audit_logs_id_seq START 1;
+        
+        DROP SEQUENCE IF EXISTS chat_sessions_id_seq CASCADE;
+        CREATE SEQUENCE chat_sessions_id_seq START 1;
+        
+
+    """)
+    print("   OK Sequences created")
+
     # Drop existing tables (clean slate for POC)
     cur.execute("""
-        DROP TABLE IF EXISTS merchant_embeddings CASCADE;
+
         DROP TABLE IF EXISTS chat_sessions CASCADE;
         DROP TABLE IF EXISTS audit_logs CASCADE;
         DROP TABLE IF EXISTS visit_history CASCADE;
@@ -122,14 +155,14 @@ def create_tables(conn):
     # USERS
     cur.execute("""
         CREATE TABLE users (
-            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            id VARCHAR(20) PRIMARY KEY DEFAULT gen_id('u', 'users_id_seq'),
             email           VARCHAR(255) UNIQUE NOT NULL,
             password_hash   VARCHAR(255) NOT NULL,
             full_name       VARCHAR(255) NOT NULL,
             role            VARCHAR(20) NOT NULL CHECK (role IN ('DSP', 'Manager', 'Admin')),
             region          VARCHAR(100),
             area            VARCHAR(100),
-            manager_id      UUID REFERENCES users(id),
+            manager_id      VARCHAR(20) REFERENCES users(id),
             is_active       BOOLEAN DEFAULT TRUE,
             created_at      TIMESTAMPTZ DEFAULT NOW(),
             updated_at      TIMESTAMPTZ DEFAULT NOW()
@@ -142,7 +175,7 @@ def create_tables(conn):
     # MERCHANTS
     cur.execute("""
         CREATE TABLE merchants (
-            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            id VARCHAR(20) PRIMARY KEY DEFAULT gen_id('m', 'merchants_id_seq'),
             merchant_name   VARCHAR(255) NOT NULL,
             region          VARCHAR(100) NOT NULL,
             area            VARCHAR(100),
@@ -152,7 +185,7 @@ def create_tables(conn):
             address         TEXT,
             latitude        DECIMAL(10,7),
             longitude       DECIMAL(10,7),
-            assigned_dsp_id UUID REFERENCES users(id) NOT NULL,
+            assigned_dsp_id VARCHAR(20) REFERENCES users(id) NOT NULL,
             is_active       BOOLEAN DEFAULT TRUE,
             onboarding_date DATE,
             created_at      TIMESTAMPTZ DEFAULT NOW(),
@@ -167,8 +200,8 @@ def create_tables(conn):
     # MERCHANT SIGNALS
     cur.execute("""
         CREATE TABLE merchant_signals (
-            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            merchant_id         UUID REFERENCES merchants(id) NOT NULL,
+            id VARCHAR(20) PRIMARY KEY DEFAULT gen_id('ms', 'merchant_signals_id_seq'),
+            merchant_id         VARCHAR(20) REFERENCES merchants(id) NOT NULL,
             signal_date         DATE NOT NULL,
             transaction_volume  INTEGER,
             transaction_trend   DECIMAL(5,2),
@@ -187,8 +220,8 @@ def create_tables(conn):
     # DAILY SCORES
     cur.execute("""
         CREATE TABLE daily_scores (
-            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            merchant_id     UUID REFERENCES merchants(id) NOT NULL,
+            id VARCHAR(20) PRIMARY KEY DEFAULT gen_id('ds', 'daily_scores_id_seq'),
+            merchant_id     VARCHAR(20) REFERENCES merchants(id) NOT NULL,
             score_date      DATE NOT NULL,
             priority_score  DECIMAL(5,2) NOT NULL,
             rank            INTEGER,
@@ -203,15 +236,15 @@ def create_tables(conn):
     # RECOMMENDATIONS
     cur.execute("""
         CREATE TABLE recommendations (
-            id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            merchant_id         UUID REFERENCES merchants(id) NOT NULL,
+            id VARCHAR(20) PRIMARY KEY DEFAULT gen_id('r', 'recommendations_id_seq'),
+            merchant_id         VARCHAR(20) REFERENCES merchants(id) NOT NULL,
             recommended_action  TEXT NOT NULL,
             action_explanation  TEXT,
             confidence_score    DECIMAL(3,2),
             status              VARCHAR(20) DEFAULT 'New'
                                 CHECK (status IN ('New','In Progress','Done','Deferred')),
             status_updated_at   TIMESTAMPTZ,
-            status_updated_by   UUID REFERENCES users(id),
+            status_updated_by   VARCHAR(20) REFERENCES users(id),
             recommendation_date DATE DEFAULT CURRENT_DATE,
             created_at          TIMESTAMPTZ DEFAULT NOW()
         );
@@ -223,9 +256,9 @@ def create_tables(conn):
     # VISIT HISTORY
     cur.execute("""
         CREATE TABLE visit_history (
-            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            merchant_id     UUID REFERENCES merchants(id) NOT NULL,
-            dsp_id          UUID REFERENCES users(id) NOT NULL,
+            id VARCHAR(20) PRIMARY KEY DEFAULT gen_id('vh', 'visit_history_id_seq'),
+            merchant_id     VARCHAR(20) REFERENCES merchants(id) NOT NULL,
+            dsp_id          VARCHAR(20) REFERENCES users(id) NOT NULL,
             visit_date      DATE NOT NULL,
             visit_notes     TEXT,
             outcome         VARCHAR(50),
@@ -240,11 +273,11 @@ def create_tables(conn):
     # AUDIT LOGS
     cur.execute("""
         CREATE TABLE audit_logs (
-            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id     UUID REFERENCES users(id),
+            id VARCHAR(20) PRIMARY KEY DEFAULT gen_id('al', 'audit_logs_id_seq'),
+            user_id     VARCHAR(20) REFERENCES users(id),
             action      VARCHAR(100) NOT NULL,
             resource    VARCHAR(100),
-            resource_id UUID,
+            resource_id VARCHAR(20),
             details     JSONB,
             ip_address  INET,
             created_at  TIMESTAMPTZ DEFAULT NOW()
@@ -257,8 +290,8 @@ def create_tables(conn):
     # CHAT SESSIONS
     cur.execute("""
         CREATE TABLE chat_sessions (
-            id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id     UUID REFERENCES users(id) NOT NULL,
+            id VARCHAR(20) PRIMARY KEY DEFAULT gen_id('cs', 'chat_sessions_id_seq'),
+            user_id     VARCHAR(20) REFERENCES users(id) NOT NULL,
             title       VARCHAR(255),
             messages    JSONB DEFAULT '[]',
             created_at  TIMESTAMPTZ DEFAULT NOW(),
@@ -267,20 +300,6 @@ def create_tables(conn):
         CREATE INDEX idx_chat_user ON chat_sessions(user_id, updated_at DESC);
     """)
     print("   OK chat_sessions table created")
-
-    # MERCHANT EMBEDDINGS (pgvector)
-    cur.execute("""
-        CREATE TABLE merchant_embeddings (
-            id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            merchant_id     UUID REFERENCES merchants(id) NOT NULL,
-            content_type    VARCHAR(50),
-            content_text    TEXT NOT NULL,
-            embedding       vector(1536),
-            updated_at      TIMESTAMPTZ DEFAULT NOW()
-        );
-        CREATE INDEX idx_embed_merchant ON merchant_embeddings(merchant_id);
-    """)
-    print("   OK merchant_embeddings table created")
 
     # ANALYTICAL VIEWS
     cur.execute("""
@@ -356,12 +375,12 @@ def seed_data(conn):
     print("    Creating users...")
 
     # Admin
-    admin_id = str(uuid.uuid4())
     cur.execute("""
-        INSERT INTO users (id, email, password_hash, full_name, role, region)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (admin_id, "admin@gcash.com", hash_password("admin123"),
+        INSERT INTO users (email, password_hash, full_name, role, region)
+        VALUES (%s, %s, %s, %s, %s) RETURNING id
+    """, ("admin@gcash.com", hash_password("admin123"),
           "System Admin", "Admin", "NCR"))
+    admin_id = cur.fetchone()[0]
 
     # Managers (1 per region)
     manager_ids = {}
@@ -373,13 +392,13 @@ def seed_data(conn):
         ("Sofia Garcia", "Central Visayas"),
     ]
     for name, region in manager_data:
-        mid = str(uuid.uuid4())
-        manager_ids[region] = mid
         email = name.lower().replace(" ", ".") + "@gcash.com"
         cur.execute("""
-            INSERT INTO users (id, email, password_hash, full_name, role, region)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (mid, email, hash_password("manager123"), name, "Manager", region))
+            INSERT INTO users (email, password_hash, full_name, role, region)
+            VALUES (%s, %s, %s, %s, %s) RETURNING id
+        """, (email, hash_password("manager123"), name, "Manager", region))
+        mid = cur.fetchone()[0]
+        manager_ids[region] = mid
 
     # DSPs (4 per region = 20 total)
     dsp_ids = {}  # {region: [dsp_id, ...]}
@@ -401,18 +420,18 @@ def seed_data(conn):
         dsp_ids[region] = []
         areas = AREAS[region]
         for i in range(4):
-            did = str(uuid.uuid4())
-            dsp_ids[region].append(did)
             fname = dsp_first_names[dsp_idx % len(dsp_first_names)]
             lname = dsp_last_names[dsp_idx % len(dsp_last_names)]
             full_name = f"{fname} {lname}"
             email = f"{fname.lower()}.{lname.lower().replace(' ', '')}@gcash.com"
             area = areas[i % len(areas)]
             cur.execute("""
-                INSERT INTO users (id, email, password_hash, full_name, role, region, area, manager_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (did, email, hash_password("dsp123"), full_name, "DSP",
+                INSERT INTO users (email, password_hash, full_name, role, region, area, manager_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
+            """, (email, hash_password("dsp123"), full_name, "DSP",
                   region, area, manager_ids[region]))
+            did = cur.fetchone()[0]
+            dsp_ids[region].append(did)
             dsp_idx += 1
 
     total_users = 1 + len(manager_ids) + sum(len(v) for v in dsp_ids.values())
@@ -423,13 +442,13 @@ def seed_data(conn):
 
     merchant_ids = []  # [(merchant_id, dsp_id, region, area, tier)]
     merchant_count = 0
+    m_counter = 0
 
     for region in REGIONS:
         for dsp_id in dsp_ids[region]:
             # Each DSP has 20-30 merchants
             num_merchants = random.randint(20, 30)
             for _ in range(num_merchants):
-                mid = str(uuid.uuid4())
                 area = random.choice(AREAS[region])
                 prefix = random.choice(MERCHANT_PREFIXES)
                 name = random.choice(MERCHANT_NAMES)
@@ -444,15 +463,15 @@ def seed_data(conn):
                 lng = round(random.uniform(120.0, 127.0), 7)
 
                 cur.execute("""
-                    INSERT INTO merchants (id, merchant_name, region, area, tier, category,
+                    INSERT INTO merchants (merchant_name, region, area, tier, category,
                                           contact_number, address, latitude, longitude,
                                           assigned_dsp_id, onboarding_date)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """, (mid, merchant_name, region, area, tier, category,
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+                """, (merchant_name, region, area, tier, category,
                       generate_phone(), generate_address(area, region),
                       lat, lng, dsp_id,
                       today - timedelta(days=onboard_days)))
-
+                mid = cur.fetchone()[0]
                 merchant_ids.append((mid, dsp_id, region, area, tier))
                 merchant_count += 1
 
@@ -460,22 +479,17 @@ def seed_data(conn):
 
     #  3. MERCHANT SIGNALS (last 7 days) 
     print("    Generating merchant signals (7 days)...")
-
-    signal_count = 0
+    signal_data = []
     for day_offset in range(7):
         signal_date = today - timedelta(days=day_offset)
         for mid, dsp_id, region, area, tier in merchant_ids:
-            # Generate realistic signal patterns
-            base_vol = {"Gold": 150, "Silver": 80, "Bronze": 40, "New": 15}[tier]
-            transaction_volume = max(0, base_vol + random.randint(-30, 30))
-
-            # Some merchants have declining trends (makes interesting data)
+            transaction_volume = random.randint(10, 500)
             if random.random() < 0.25:
-                transaction_trend = round(random.uniform(-50, -5), 2)  # declining
+                transaction_trend = round(random.uniform(-50, -5), 2)
             elif random.random() < 0.6:
-                transaction_trend = round(random.uniform(-5, 5), 2)    # stable
+                transaction_trend = round(random.uniform(-5, 5), 2)
             else:
-                transaction_trend = round(random.uniform(5, 30), 2)    # growing
+                transaction_trend = round(random.uniform(5, 30), 2)
 
             days_since_visit = random.choices(
                 [random.randint(0, 3), random.randint(4, 14), random.randint(15, 45)],
@@ -495,19 +509,27 @@ def seed_data(conn):
             wallet_balance = round(random.uniform(100, 50000), 2)
             active_products = random.randint(1, 8)
 
-            cur.execute("""
-                INSERT INTO merchant_signals
-                    (merchant_id, signal_date, transaction_volume, transaction_trend,
-                     days_since_visit, complaint_count, campaign_status,
-                     wallet_balance, active_products)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (merchant_id, signal_date) DO NOTHING
-            """, (mid, signal_date, transaction_volume, transaction_trend,
-                  days_since_visit, complaint_count, campaign_status,
-                  wallet_balance, active_products))
-            signal_count += 1
+            signal_data.append((
+                mid, signal_date, transaction_volume, transaction_trend,
+                days_since_visit, complaint_count, campaign_status,
+                wallet_balance, active_products
+            ))
 
-    print(f"   OK {signal_count} signal records created")
+    from psycopg2.extras import execute_values
+    execute_values(
+        cur,
+        """
+        INSERT INTO merchant_signals
+            (merchant_id, signal_date, transaction_volume, transaction_trend,
+             days_since_visit, complaint_count, campaign_status,
+             wallet_balance, active_products)
+        VALUES %s
+        ON CONFLICT (merchant_id, signal_date) DO NOTHING
+        """,
+        signal_data
+    )
+
+    print(f"   OK {len(signal_data)} signal records created")
 
     #  4. COMPUTE DAILY SCORES (today) 
     print("    Computing priority scores...")
@@ -562,67 +584,9 @@ def seed_data(conn):
 
     print(f"   OK {len(score_data)} priority scores computed & ranked")
 
-    #  5. RECOMMENDATIONS (today) 
-    print("    Generating recommendations...")
-
+    # Recommendations are no longer seeded automatically.
+    # Users will generate them live using the Generate Brief button.
     rec_count = 0
-    statuses = ["New", "New", "New", "In Progress", "Done", "Deferred"]
-    for mid, dsp_id, region, area, tier in merchant_ids:
-        cur.execute("""
-            SELECT transaction_trend, days_since_visit, complaint_count,
-                   campaign_status, wallet_balance, active_products
-            FROM merchant_signals
-            WHERE merchant_id = %s AND signal_date = %s
-        """, (mid, today))
-        row = cur.fetchone()
-        if not row:
-            continue
-
-        trend, days_visit, complaints, camp_status, balance, products = row
-
-        # Pick a recommendation based on the dominant signal
-        template = random.choice(RECOMMENDATION_TEMPLATES)
-        action = template.format(
-            drop=abs(int(trend or 10)),
-            tier=tier,
-            complaints=complaints or 0,
-            days=days_visit or 0,
-            balance=int(balance or 0),
-            products=products or 1,
-            growth=abs(int(trend or 5)),
-        )
-
-        explanation = f"Based on {tier} tier merchant with "
-        reasons = []
-        if trend and trend < -10:
-            reasons.append(f"{abs(trend):.0f}% transaction decline")
-        if days_visit and days_visit > 14:
-            reasons.append(f"{days_visit} days since last visit")
-        if complaints and complaints > 0:
-            reasons.append(f"{complaints} active complaint(s)")
-        if camp_status == "Inactive":
-            reasons.append("inactive campaign status")
-        if not reasons:
-            reasons.append("routine check-in due")
-        explanation += ", ".join(reasons) + "."
-
-        status = random.choice(statuses)
-        confidence = round(random.uniform(0.65, 0.98), 2)
-
-        cur.execute("""
-            INSERT INTO recommendations
-                (merchant_id, recommended_action, action_explanation,
-                 confidence_score, status, recommendation_date,
-                 status_updated_by, status_updated_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        """, (mid, action, explanation, confidence, status, today,
-              dsp_id if status != "New" else None,
-              datetime.now() if status != "New" else None))
-        rec_count += 1
-
-    print(f"   OK {rec_count} recommendations created")
-
-    #  6. VISIT HISTORY (last 60 days) 
     print("    Generating visit history...")
 
     visit_count = 0
@@ -709,7 +673,7 @@ def seed_data(conn):
       - Managers:       {len(manager_ids)}
       - DSPs:           {total_users - 1 - len(manager_ids)}
     Merchants:          {merchant_count}
-    Signal Records:     {signal_count}
+    Signal Records:     {len(signal_data)}
     Priority Scores:    {len(score_data)}
     Recommendations:    {rec_count}
     Visit Records:      {visit_count}
@@ -725,42 +689,42 @@ def seed_data(conn):
     """)
 
 
-def verify_data(conn):
-    """Run quick checks to confirm data is correct."""
-    cur = conn.cursor()
+# def verify_data(conn):
+#     """Run quick checks to confirm data is correct."""
+#     cur = conn.cursor()
 
-    print(" Verifying data...\n")
+#     print(" Verifying data...\n")
 
-    checks = [
-        ("Users by role", "SELECT role, COUNT(*) FROM users GROUP BY role ORDER BY role"),
-        ("Merchants by tier", "SELECT tier, COUNT(*) FROM merchants GROUP BY tier ORDER BY tier"),
-        ("Merchants by region", "SELECT region, COUNT(*) FROM merchants GROUP BY region ORDER BY region"),
-        ("Signals (today)", "SELECT COUNT(*) FROM merchant_signals WHERE signal_date = CURRENT_DATE"),
-        ("Top 5 Priority Merchants", """
-            SELECT m.merchant_name, m.tier, ds.priority_score, ds.rank
-            FROM daily_scores ds
-            JOIN merchants m ON m.id = ds.merchant_id
-            WHERE ds.score_date = CURRENT_DATE
-            ORDER BY ds.rank
-            LIMIT 5
-        """),
-        ("Recommendation status distribution", """
-            SELECT status, COUNT(*) FROM recommendations
-            WHERE recommendation_date = CURRENT_DATE
-            GROUP BY status ORDER BY status
-        """),
-        ("Area Summary (view)", "SELECT * FROM v_area_summary LIMIT 5"),
-    ]
+#     checks = [
+#         ("Users by role", "SELECT role, COUNT(*) FROM users GROUP BY role ORDER BY role"),
+#         ("Merchants by tier", "SELECT tier, COUNT(*) FROM merchants GROUP BY tier ORDER BY tier"),
+#         ("Merchants by region", "SELECT region, COUNT(*) FROM merchants GROUP BY region ORDER BY region"),
+#         ("Signals (today)", "SELECT COUNT(*) FROM merchant_signals WHERE signal_date = CURRENT_DATE"),
+#         ("Top 5 Priority Merchants", """
+#             SELECT m.merchant_name, m.tier, ds.priority_score, ds.rank
+#             FROM daily_scores ds
+#             JOIN merchants m ON m.id = ds.merchant_id
+#             WHERE ds.score_date = CURRENT_DATE
+#             ORDER BY ds.rank
+#             LIMIT 5
+#         """),
+#         ("Recommendation status distribution", """
+#             SELECT status, COUNT(*) FROM recommendations
+#             WHERE recommendation_date = CURRENT_DATE
+#             GROUP BY status ORDER BY status
+#         """),
+#         ("Area Summary (view)", "SELECT * FROM v_area_summary LIMIT 5"),
+#     ]
 
-    for label, query in checks:
-        print(f"    {label}:")
-        cur.execute(query)
-        rows = cur.fetchall()
-        cols = [desc[0] for desc in cur.description]
-        for row in rows:
-            formatted = ", ".join(f"{c}={v}" for c, v in zip(cols, row))
-            print(f"      {formatted}")
-        print()
+#     for label, query in checks:
+#         print(f"    {label}:")
+#         cur.execute(query)
+#         rows = cur.fetchall()
+#         cols = [desc[0] for desc in cur.description]
+#         for row in rows:
+#             formatted = ", ".join(f"{c}={v}" for c, v in zip(cols, row))
+#             print(f"      {formatted}")
+#         print()
 
 
 def main():
@@ -778,7 +742,7 @@ def main():
     print(f"\n Connecting to database...")
     try:
         conn = psycopg2.connect(DATABASE_URL)
-        conn.autocommit = True
+        conn.autocommit = False
         print("   OK Connected successfully!")
     except Exception as e:
         print(f"\nFAIL Connection failed: {e}")
@@ -788,7 +752,7 @@ def main():
     try:
         create_tables(conn)
         seed_data(conn)
-        verify_data(conn)
+        # verify_data(conn)
     except Exception as e:
         conn.rollback()
         print(f"\nFAIL Error: {e}")
