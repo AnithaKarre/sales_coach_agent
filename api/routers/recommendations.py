@@ -119,15 +119,13 @@ async def update_recommendation_status(
     try:
         cur.execute(
             """
-            INSERT INTO audit_logs (user_id, action, resource, resource_id, details)
-            VALUES (%s, %s, %s, %s, %s::jsonb)
+            INSERT INTO audit_logs (user_id, action, resource)
+            VALUES (%s, %s, %s)
             """,
             (
                 uid,
                 "UPDATE_ACTION_STATUS",
                 "recommendation",
-                recommendation_id,
-                f'{{"new_status": "{db_status}"}}',
             ),
         )
         conn.commit()

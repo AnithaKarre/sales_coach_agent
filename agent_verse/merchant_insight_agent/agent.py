@@ -20,15 +20,8 @@ AGENT_NAME = "merchant_insight_agent"
 
 VALID_MODES = ("profile", "score", "recommendation", "brief")
 
-# Tools this agent is allowed to use (per revised plan §2.3 / §8.3).
-# Format: "plugin_name-function_name"
-ALLOWED_TOOLS = [
-    "merchant_db-get_merchant_details",
-    "merchant_db-get_merchant_score",
-    "merchant_db-get_merchant_recommendations",
-    "merchant_db-get_merchant_visit_history",
-]
-
+# This agent exclusively uses Context Injection (RAG) and no longer uses MCP tools.
+# See api/routers/merchants.py -> POST /merchants/{id}/generate-brief
 
 class MerchantInsightAgent:
     """
@@ -68,25 +61,12 @@ class MerchantInsightAgent:
     async def get_agent(self):
         kernel = Kernel()
 
-        log.debug(f"Initializing [🤖] {AGENT_NAME}")
+        log.debug(f"Initializing [🤖] {AGENT_NAME} (Context Injection Mode)")
 
         chat_service = AgentLLMFactory.get_chat_completion()
         kernel.add_service(chat_service)
 
-        # Attach Merchant DB MCP Server via SSE
-        db_mcp_url = self.plugin_config.get("sse_server_url")
-        if not db_mcp_url:
-            raise RuntimeError("db_plugin.sse_server_url not configured")
-
-        db_plugin = MCPSsePlugin(name="merchant_db", url=db_mcp_url)
-        await db_plugin.connect()
-        kernel.add_plugin(db_plugin)
-
-        # Restrict auto tool calling to ONLY the 4 merchant-data tools
-        settings = kernel.get_prompt_execution_settings_from_service_id(chat_service.service_id)
-        settings.function_choice_behavior = FunctionChoiceBehavior.Auto(
-            filters={"included_functions": ALLOWED_TOOLS}
-        )
+        # Tools and MCP removed: Agent relies 100% on injected SQL context
 
         prompt = PromptFactory().get_agent_prompt()
 
@@ -94,8 +74,7 @@ class MerchantInsightAgent:
             kernel=kernel,
             name=AGENT_NAME,
             description="Fetches and summarizes merchant profile, score, and recommendations, or compiles a full pre-visit brief.",
-            instructions=prompt,
-            arguments=KernelArguments(settings=settings)
+            instructions=prompt
         )
 
         return agent
