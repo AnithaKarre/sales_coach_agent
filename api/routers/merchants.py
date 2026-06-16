@@ -26,10 +26,13 @@ def _scope_clause(role: str, user_id: str):
     return "m.assigned_dsp_id = %s", [user_id]
 
 
-async def _invoke_insight_agent(app_state, merchant_name: str, mode: str, user_id: str, user_role: str) -> str:
+async def _invoke_insight_agent(app_state, merchant_name: str, mode: str, user_id: str, user_role: str, context_data: str = None) -> str:
     """Invoke the Merchant Insight Agent for score/recommendation/brief."""
     agent = app_state.insight_agent
     message = f"user_id={user_id}\nuser_role={user_role}\nmode={mode}\nmerchant: {merchant_name}"
+    if context_data:
+        message += f"\n\nRAW DATABASE CONTEXT (Use this data to generate your response. Do NOT call MCP tools to fetch data that is already provided here):\n{context_data}"
+        
     result = None
     async for response in agent.invoke(messages=message):
         result = response
@@ -275,13 +278,26 @@ async def generate_merchant_brief(
 
     merchant_name = merchant["merchant_name"]
     
-    # Invoke AI
+    # 1. First landing: Fetch from DB directly to avoid tool hallucination / name quoting issues
+    import json
+    try:
+        detail_data = await merchant_detail(merchant_id, user, conn)
+        history_data = await merchant_history(merchant_id, user, conn)
+        context_data = json.dumps({
+            "merchant_profile_and_scores": detail_data,
+            "recent_visit_history": history_data
+        }, default=str)
+    except Exception:
+        context_data = None
+    
+    # 2. Invoke AI with injected context
     brief_text = await _invoke_insight_agent(
-        request.app.state,
-        merchant_name,
-        "insight",
-        user["user_id"],
-        user["role"]
+        app_state=request.app.state,
+        merchant_name=merchant_name,
+        mode="brief",
+        user_id=user["user_id"],
+        user_role=user["role"],
+        context_data=context_data
     )
 
     if not brief_text:

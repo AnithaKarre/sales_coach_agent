@@ -23,6 +23,8 @@ STATUS_MAP = {
     "In Progress": "In Progress",
     "Done": "Done",
     "Deferred": "Deferred",
+    # Frontend uses Pending instead of New
+    "Pending": "New",
 }
 
 
@@ -55,18 +57,13 @@ async def update_recommendation_status(
     role = user["role"]
 
     # Build RBAC scope
-    if role == "Admin":
-        scope_sql = "TRUE"
-        scope_params = []
-    elif role == "Manager":
-        scope_sql = (
-            "m.assigned_dsp_id IN "
-            "(SELECT id FROM users WHERE manager_id = %s OR id = %s)"
+    if role != "DSP":
+        raise HTTPException(
+            status_code=403, 
+            detail="Forbidden: Only DSPs can update recommendation statuses according to the permission matrix."
         )
-        scope_params = [uid, uid]
-    else:
-        scope_sql = "m.assigned_dsp_id = %s"
-        scope_params = [uid]
+    scope_sql = "m.assigned_dsp_id = %s"
+    scope_params = [uid]
 
     cur.execute(
         f"""
@@ -89,6 +86,34 @@ async def update_recommendation_status(
         raise HTTPException(status_code=404, detail="Recommendation not found or access denied")
 
     conn.commit()
+
+    # Auto-log a visit when status changes to "Done"
+    if db_status == "Done":
+        try:
+            # Get merchant_id and recommendation text for the visit notes
+            cur.execute(
+                "SELECT merchant_id, recommended_action FROM recommendations WHERE id = %s",
+                (recommendation_id,),
+            )
+            rec_row = cur.fetchone()
+            if rec_row:
+                action_text = (rec_row["recommended_action"] or "")[:200]
+                cur.execute(
+                    """
+                    INSERT INTO visit_history (merchant_id, dsp_id, visit_date, visit_notes, outcome, duration_mins)
+                    VALUES (%s, %s, CURRENT_DATE, %s, %s, %s)
+                    """,
+                    (
+                        rec_row["merchant_id"],
+                        uid,
+                        f"Completed recommendation: {action_text}",
+                        "Recommendation fulfilled",
+                        15,
+                    ),
+                )
+                conn.commit()
+        except Exception:
+            pass  # Visit log failure should not block the response
 
     # Audit log
     try:

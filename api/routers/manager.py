@@ -55,7 +55,7 @@ async def area_summary(
     cur2 = conn.cursor()
     if role == "Admin":
         cur2.execute(
-            "SELECT COUNT(*) AS cnt FROM daily_scores WHERE score_date = CURRENT_DATE AND priority_score >= 70"
+            "SELECT COUNT(*) AS cnt FROM daily_scores WHERE score_date = (SELECT MAX(score_date) FROM daily_scores) AND priority_score >= 70"
         )
     else:
         cur2.execute(
@@ -63,7 +63,7 @@ async def area_summary(
             SELECT COUNT(*) AS cnt
             FROM daily_scores ds
             JOIN merchants m ON m.id = ds.merchant_id
-            WHERE ds.score_date = CURRENT_DATE
+            WHERE ds.score_date = (SELECT MAX(score_date) FROM daily_scores)
               AND ds.priority_score >= 70
               AND m.region = (SELECT region FROM users WHERE id = %s)
             """,
@@ -72,10 +72,48 @@ async def area_summary(
     hp_row = cur2.fetchone()
     high_priority_count = hp_row["cnt"] if hp_row else 0
 
+    # Visits by area (count visit_history grouped by area)
+    cur3 = conn.cursor()
+    if role == "Admin":
+        cur3.execute(
+            """
+            SELECT m.area, COUNT(v.id) AS visits
+            FROM visit_history v
+            JOIN merchants m ON m.id = v.merchant_id
+            WHERE v.visit_date >= CURRENT_DATE - INTERVAL '7 days'
+            GROUP BY m.area
+            ORDER BY m.area
+            """
+        )
+    else:
+        cur3.execute(
+            """
+            SELECT m.area, COUNT(v.id) AS visits
+            FROM visit_history v
+            JOIN merchants m ON m.id = v.merchant_id
+            WHERE v.visit_date >= CURRENT_DATE - INTERVAL '7 days'
+              AND m.region = (SELECT region FROM users WHERE id = %s)
+            GROUP BY m.area
+            ORDER BY m.area
+            """,
+            (uid,),
+        )
+    visit_rows = cur3.fetchall()
+    # Build visits_by_area with a target of 10 per area per week
+    visits_by_area = [
+        {
+            "area": vr["area"] or "Unknown",
+            "visits": vr["visits"] or 0,
+            "target": 10,
+        }
+        for vr in visit_rows
+    ]
+
     return {
         "completion_rate": completion_rate,
         "total_merchants": total_merchants,
         "high_priority": high_priority_count,
+        "visits_by_area": visits_by_area,
         "areas": [
             {
                 "region": r["region"],
@@ -125,15 +163,14 @@ async def team_performance(
     rows = cur.fetchall()
     return [
         {
-            "dsp_id": str(r["dsp_id"]),
-            "dsp_name": r["dsp_name"],
+            "name": r["dsp_name"],
             "region": r["region"],
             "area": r["area"],
-            "merchant_count": r["merchant_count"],
-            "avg_portfolio_score": float(r["avg_portfolio_score"]) if r["avg_portfolio_score"] else None,
-            "actions_completed": r["actions_completed"],
-            "actions_open": r["actions_open"],
-            "completion_rate": float(r["completion_rate"]) if r["completion_rate"] else 0,
+            "merchants": r["merchant_count"],
+            "avg_score": round(float(r["avg_portfolio_score"]), 1) if r["avg_portfolio_score"] else None,
+            "completed": r["actions_completed"],
+            "open": r["actions_open"],
+            "completion_rate": f"{round(float(r['completion_rate']), 1)}%" if r["completion_rate"] else "0%",
         }
         for r in rows
     ]

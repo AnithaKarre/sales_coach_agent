@@ -227,13 +227,17 @@ class MerchantDBPlugin:
     @staticmethod
     @mcp.tool()
     def update_action(recommendation_id: str, status: str, user_id: str, user_role: str) -> str:
-        """Updates the status of a recommendation/action (New, In Progress, Done, Deferred). Only the assigned DSP (or Admin) may update; scoped to the caller's access. Requires user_id and user_role."""
+        """Updates the status of a recommendation/action (New, In Progress, Done, Deferred). Only the assigned DSP may update; scoped to the caller's access. Requires user_id and user_role."""
         valid_status = ("New", "In Progress", "Done", "Deferred")
         try:
             if status not in valid_status:
                 return str({"error": f"Invalid status. Must be one of {valid_status}"})
 
-            scope_sql, scope_params = MerchantDBPlugin._scope_clause(user_id, user_role)
+            if user_role != "DSP":
+                return str({"error": "Forbidden: Only DSPs can update recommendation statuses according to the permission matrix."})
+
+            scope_sql = "m.assigned_dsp_id = %s"
+            scope_params = [user_id]
             conn = MerchantDBPlugin._get_connection()
             cur = conn.cursor()
             cur.execute(
