@@ -29,12 +29,11 @@ except ImportError:
     from psycopg2.extras import execute_values
 
 # ============================================================
-# CONFIG  Paste your Neon connection string here
+# CONFIG  Set DATABASE_URL in your environment or .env file
 # ============================================================
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_iErpGOuI70XN@ep-damp-darkness-aqzim7gn-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set")
 
 # ============================================================
 # REALISTIC DATA TEMPLATES

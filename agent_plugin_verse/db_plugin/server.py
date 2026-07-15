@@ -34,12 +34,9 @@ class MerchantDBPlugin:
     # -----------------------
     @staticmethod
     def _get_connection():
-        # NOTE: Demo convenience — hardcoded fallback so the server runs without
-        # requiring DATABASE_URL to be set. Do NOT keep this for production.
-        db_url = os.environ.get(
-            "DATABASE_URL",
-            "postgresql://neondb_owner:npg_iErpGOuI70XN@ep-damp-darkness-aqzim7gn-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-        )
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            raise RuntimeError("DATABASE_URL environment variable is not set")
         return psycopg2.connect(db_url)
 
     @staticmethod

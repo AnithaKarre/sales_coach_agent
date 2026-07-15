@@ -4,10 +4,9 @@ import json
 from datetime import date
 import psycopg2
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_iErpGOuI70XN@ep-damp-darkness-aqzim7gn-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set")
 
 def run_reprofiling():
     print("=" * 60)
