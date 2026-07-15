@@ -1,211 +1,400 @@
-# SalesCoach AI — MVP Backend
+# SalesCoach AI — Multi-Agent Sales Coaching Platform
 
-AI-powered field-sales decision support for GCash's merchant distribution network.
-The backend exposes **independent per-agent endpoints** (no orchestration layer) so
-the frontend can call each AI capability separately.
+AI-powered field-sales decision support for merchant-facing teams.
 
-> **LLM provider:** Groq (`llama-3.3-70b-versatile`) via its OpenAI-compatible API.
+<!-- Badges (styled like the example you provided) -->
+![version](https://img.shields.io/badge/version-0.1.0-blue)
+![python](https://img.shields.io/badge/python-3.11%2B-brightgreen)
+![license](https://img.shields.io/badge/license-MIT-green)
+![Google%20ADK](https://img.shields.io/badge/Google%20ADK-1.13%2B-orange)
+![MCP](https://img.shields.io/badge/MCP-SSE-purple)
+![LiteLLM](https://img.shields.io/badge/LiteLLM-multi--provider-yellow)
+![multi-provider](https://img.shields.io/badge/multi--provider-true-lightgrey)
 
 ---
 
-## 1. Architecture
+## 1. Architecture — Invocation, Links and Call Flow
 
+The diagram below shows how requests flow through the system and which components call which tools / services. Use this for both documentation and as a basis for an interview whiteboard explanation.
+
+```mermaid
+flowchart LR
+  subgraph Client [Client]
+    ClientNode["Frontend / CLI / cURL"]
+  end
+
+  subgraph API [API Layer]
+    APINode["FastAPI (api/main.py)"]
+  end
+
+  subgraph Orchestrator [Orchestrator]
+    OrchestratorNode["Orchestrator Agent (agent_verse/orchestrator_agent/agent.py)"]
+  end
+
+  subgraph Agents [Agents]
+    ChatNode["Chat Agent (agent_verse/chat_agent/agent.py)"]
+    InsightNode["Merchant Insight Agent (agent_verse/merchant_insight_agent/agent.py)"]
+  end
+
+  subgraph Tools [MCP Tools]
+    MCPNode["Merchant DB MCP Server (agent_plugin_verse/db_plugin/server.py)"]
+  end
+
+  subgraph Data [Data]
+    Postgres["PostgreSQL"]
+  end
+
+  subgraph LLMs [LLM]
+    LLMNode["LLM Factory (ai_model/agent_llm_factory.py)"]
+  end
+
+  ClientNode -->|HTTP JSON| APINode
+  APINode -->|startup: build agents| OrchestratorNode
+  OrchestratorNode -->|route: chat| ChatNode
+  OrchestratorNode -->|route: insight| InsightNode
+
+  ChatNode -->|SSE / tool calls| MCPNode
+  InsightNode -->|context injection or SSE| MCPNode
+  MCPNode -->|psycopg2| Postgres
+
+  ChatNode -->|calls LLM| LLMNode
+  InsightNode -->|calls LLM| LLMNode
+  OrchestratorNode -->|may call LLM| LLMNode
 ```
-┌──────────────┐      HTTP/JSON       ┌───────────────────────────┐
-│   Frontend   │ ───────────────────▶ │   FastAPI  (api/main.py)  │
-└──────────────┘                      │                           │
-                                      │  • Chat Agent endpoint    │
-                                      │  • Merchant Insight       │
-                                      │    Agent endpoints        │
-                                      └─────────────┬─────────────┘
-                                                    │ Semantic Kernel
-                                                    │ (ChatCompletionAgent + Groq)
-                                                    ▼
-                                      ┌───────────────────────────┐
-                                      │  Merchant DB MCP Server    │
-                                      │  (agent_plugin_verse/...)  │
-                                      │  RBAC-scoped DB tools      │
-                                      └─────────────┬─────────────┘
-                                                    │ psycopg2
-                                                    ▼
-                                          ┌──────────────────┐
-                                          │   PostgreSQL     │
-                                          └──────────────────┘
+
+Key invocation notes:
+
+- `api/main.py` constructs the agents at app startup and exposes HTTP endpoints.
+- The Orchestrator accepts a request and classifies intent (navigation / chat / insight).
+- For chat, the Chat Agent may call the Merchant DB MCP tools (SSE) for structured data and the LLM for natural-language reasoning.
+- For insight, the Merchant Insight Agent composes SQL context (Context Injection) or calls MCP tools and then calls the LLM to produce the human-readable brief.
+- The MCP server enforces RBAC (`user_id` + `user_role`) and returns only scoped rows to agents.
+
+How the links are connected (implementation paths):
+
+- API startup: `api/main.py` -> constructs `ChatAgent().get_agent()` and `MerchantInsightAgent().get_agent()` and wires them into the `OrchestratorAgent().build()` flow.
+- Chat agent plugin: `agent_verse/chat_agent/agent.py` -> `MCPSsePlugin(name="merchant_db", url=plugin_config['sse_server_url'])` -> attached to the agent's `Kernel` as a plugin.
+- MCP server entry point: `agent_plugin_verse/db_plugin/server.py` -> defines `mcp.tool()` functions like `get_merchant_details`, `get_merchant_score`, `search_data`, etc.
+- LLM wiring: `ai_model/agent_llm_factory.py` -> `get_chat_completion()` returns the Semantic Kernel chat service used by agents.
+
+---
+## Overview
+
+SalesCoach AI helps sales teams understand merchant performance, retrieve contextual insights, and ask grounded questions over business data. The platform is designed around three technical pillars:
+
+- Multi-agent orchestration for intent routing and specialized execution
+- Tool-augmented reasoning through the Merchant DB MCP server
+- Secure, role-aware access control enforced before data is returned
+
+### Key Capabilities
+
+| Capability | Description |
+|---|---|
+| Multi-agent orchestration | A central orchestrator classifies user intent and routes requests to the correct sub-agent. |
+| Merchant insight generation | Produces profile, score, recommendation, or pre-visit brief summaries for a merchant. |
+| Conversational coaching | Supports open-ended questions grounded in merchant and activity data via the Chat Agent. |
+| RBAC-enforced data access | Every merchant DB tool validates the caller's role and scopes results to the caller's access domain. |
+| Provider-agnostic LLM loading | The LLM factory abstracts model construction through a JSON configuration model and environment-backed secrets. |
+
+---
+# SalesCoach AI � Multi-Agent Sales Coaching Platform
+
+SalesCoach AI is a modular, production-oriented backend for AI-assisted field sales operations. It combines a FastAPI application, Semantic Kernel agents, an MCP-based merchant database server, and role-aware data access to support merchant insight generation, conversational coaching, and operational workflows.
+
+> This repository reflects a multi-agent architecture rather than a single-agent MVP. The system routes requests through an orchestrator, uses specialized sub-agents, and enforces data access rules in the MCP layer.
+
+---
+
+## Overview
+
+SalesCoach AI helps sales teams understand merchant performance, retrieve contextual insights, and ask grounded questions over business data. The platform is designed around three technical pillars:
+
+- Multi-agent orchestration for intent routing and specialized execution
+- Tool-augmented reasoning through the Merchant DB MCP server
+- Secure, role-aware access control enforced before data is returned
+
+### Key Capabilities
+
+| Capability | Description |
+|---|---|
+| Multi-agent orchestration | A central orchestrator classifies user intent and routes requests to the correct sub-agent. |
+| Merchant insight generation | Produces profile, score, recommendation, or pre-visit brief summaries for a merchant. |
+| Conversational coaching | Supports open-ended questions grounded in merchant and activity data via the Chat Agent. |
+| RBAC-enforced data access | Every merchant DB tool validates the caller's role and scopes results to the caller's access domain. |
+| Provider-agnostic LLM loading | The LLM factory abstracts model construction through a JSON configuration model and environment-backed secrets. |
+
+---
+
+## Architecture
+
+The system is composed of four layers:
+
+1. API layer � FastAPI routers expose business endpoints.
+2. Agent layer � Semantic Kernel agents interpret requests and orchestrate reasoning.
+3. Tool layer � MCP server exposes structured merchant database tools.
+4. Data layer � PostgreSQL stores merchant, user, signal, recommendation, and audit data.
+
+```mermaid
+flowchart LR
+    Client[Client / Frontend / cURL] --> API[FastAPI API<br/>api/main.py]
+    API --> ORCH[Orchestrator Agent<br/>agent_verse/orchestrator_agent/agent.py]
+    ORCH --> CHAT[Chat Agent<br/>agent_verse/chat_agent/agent.py]
+    ORCH --> INSIGHT[Merchant Insight Agent<br/>agent_verse/merchant_insight_agent/agent.py]
+
+    CHAT --> LLM[LLM Runtime<br/>ai_model/agent_llm_factory.py]
+    INSIGHT --> LLM
+    ORCH --> LLM
+
+    CHAT --> MCP[Merchant DB MCP Server<br/>agent_plugin_verse/db_plugin/server.py]
+    INSIGHT --> MCP
+
+    MCP --> PG[(PostgreSQL)]
 ```
 
-### Agents (2)
+### Runtime Flow
 
-| Agent | Folder | Responsibility |
+- Incoming requests hit the FastAPI application in api/main.py.
+- The application builds the orchestrator and its two sub-agents once during startup.
+- The orchestrator analyzes the request and chooses between navigation, merchant insight, or chat behavior.
+- The sub-agents interact with the Merchant DB MCP server through tool calls that are scoped by role and ownership.
+- The MCP server executes SQL against PostgreSQL and returns only authorized data.
+
+### Architectural Components
+
+| Layer | Path | Responsibility |
 |---|---|---|
-| **Merchant Insight Agent** | `agent_verse/merchant_insight_agent/` | Fetch & summarize a merchant's `profile`, `score`, `recommendation`, or a full `brief` (mode-driven). Consolidates the former Profile/Scoring/Recommendation/Brief agents. |
-| **Chat Agent** | `agent_verse/chat_agent/` | Open-ended "Ask SalesCoach" Q&A grounded on authorized merchant data, with guardrails. |
-
-### MCP tools (RBAC-scoped)
-
-All tools require `user_id` + `user_role` and filter rows by the caller's scope
-(DSP → own merchants, Manager → team, Admin → all):
-
-`get_merchant_details`, `get_merchant_score`, `get_merchant_recommendations`,
-`get_merchant_visit_history`, `update_action`, `search_data`, `get_audit`.
-
----
-
-## 2. Prerequisites
-
-- Python 3.11+ (tested on 3.13)
-- A reachable PostgreSQL database (the seed script targets Neon)
-- A Groq API key — https://console.groq.com/keys
-- Network access to `api.groq.com` (corporate proxies may block it)
+| API | api/main.py | Builds the FastAPI app, registers routers, and wires the agents into app lifecycle. |
+| Routers | api/routers | Exposes auth, dashboard, merchant, recommendation, chat, manager, and admin endpoints. |
+| Orchestrator | agent_verse/orchestrator_agent/agent.py | Routes requests to the correct downstream agent and validates user role. |
+| Chat Agent | agent_verse/chat_agent/agent.py | Answers conversational questions using MCP-backed merchant data. |
+| Merchant Insight Agent | agent_verse/merchant_insight_agent/agent.py | Produces merchant profile, score, recommendation, and brief-style summaries. |
+| LLM Factory | ai_model/agent_llm_factory.py | Loads LLM configuration and instantiates the appropriate chat completion backend. |
+| MCP Server | agent_plugin_verse/db_plugin/server.py | Exposes authorized database tools over SSE for agent use. |
+| Data Access | api/database.py | Provides PostgreSQL connectivity for the API layer. |
+| Seed + DB Setup | db/setup_and_seed.py | Creates schema and populates synthetic data for local development. |
 
 ---
 
-## 3. Setup
+## Design Principles
+
+- Modular agent composition � each agent has a focused concern and the orchestrator handles delegation.
+- Tool-first grounding � the Chat and Insight agents use structured tools instead of relying only on raw model memory.
+- RBAC at the data boundary � the MCP server is the enforcement point for role-aware access.
+- Environment-driven configuration � secrets and runtime settings are expected from environment variables.
+- Provider abstraction � the LLM factory supports multiple backends through the same interface.
+
+---
+
+## Project Structure
+
+```text
+sales_coach_agent/
++-- api/
+�   +-- main.py
+�   +-- database.py
+�   +-- dependencies.py
+�   +-- routers/
+�       +-- admin.py
+�       +-- auth.py
+�       +-- chat.py
+�       +-- dashboard.py
+�       +-- manager.py
+�       +-- merchants.py
+�       +-- recommendations.py
+�       +-- __init__.py
++-- agent_verse/
+�   +-- chat_agent/
+�   �   +-- agent.py
+�   �   +-- prompt/
+�   +-- merchant_insight_agent/
+�   �   +-- agent.py
+�   �   +-- prompt/
+�   +-- orchestrator_agent/
+�       +-- agent.py
+�       +-- prompt/
++-- agent_plugin_verse/
+�   +-- db_plugin/
+�       +-- server.py
++-- ai_model/
+�   +-- agent_llm_factory.py
++-- config/
+�   +-- credential_manager.py
+�   +-- llm_config.json
+�   +-- plugin_config.json
++-- db/
+�   +-- daily_reprofiling.py
+�   +-- setup_and_seed.py
++-- utils/
+�   +-- logger.py
+�   +-- metrices.py
++-- requirements.txt
++-- README.md
+```
+
+---
+
+## Prerequisites
+
+- Python 3.11+
+- PostgreSQL database reachable from the local environment
+- A valid LLM provider API key (the current implementation is configured for Groq-compatible endpoints)
+- Network access to the configured LLM endpoint
+
+---
+
+## Quick Start
+
+### 1. Create a virtual environment
 
 ```powershell
-# 1. Create and activate a virtual environment
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1          # PowerShell
-# If activation is blocked by execution policy, either run:
-#   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-# or call the interpreter directly: .\.venv\Scripts\python.exe ...
-
-# 2. Install dependencies
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-
-# 3. Configure environment
-Copy-Item .env.example .env
-#   then edit .env and set GROQ_API_KEY and DATABASE_URL
+.\.venv\Scripts\Activate.ps1
 ```
 
-### Configuration files
+### 2. Install dependencies
 
-- **`.env`** — secrets & runtime config (see `.env.example`).
-- **`config/llm_config.json`** — LLM provider settings (Groq model + base URL).
-- **`config/plugin_config.json`** — MCP server SSE URL (`http://localhost:8000/sse`).
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
 
----
+### 3. Configure environment variables
 
-## 4. Seed the database (first run only)
+Create a `.env` file in the project root with at least:
+
+```env
+DATABASE_URL=postgresql://<user>:<password>@<host>:<port>/<db>
+GROQ_API_KEY=your_groq_api_key
+LLM_CONFIG_FILE=config/llm_config.json
+PLUGINS_CONFIG_FILE=config/plugin_config.json
+AGENT_LLM_MODEL=groq_llama_3_3_70b
+```
+
+### 4. Seed the database
 
 ```powershell
 .\.venv\Scripts\python.exe db\setup_and_seed.py
 ```
 
-This creates all tables and populates realistic synthetic data
-(users, merchants, signals, daily scores, recommendations, visit history).
+This creates the schema and populates synthetic merchant, user, recommendation, and visit-history data.
 
-**Test Credentials generated:**
-- **Admin**: `admin@gcash.com` / `admin123`
-- **Manager**: `maria.santos@gcash.com` / `manager123`
-- **DSP**: `miguel.delacruz@gcash.com` / `dsp123`
+### 5. Start the MCP server
 
----
-
-## 5. Run
-
-Open **two** terminals (both with the venv).
-
-**Terminal 1 — MCP DB server (port 9002):**
 ```powershell
 .\.venv\Scripts\python.exe -m agent_plugin_verse.db_plugin.server
 ```
 
-**Terminal 2 — API server (port 8080):**
+The MCP server listens on port 9002 by default.
+
+### 6. Start the API server
+
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn api.main:app --host 0.0.0.0 --port 8080
 ```
 
-Interactive API docs: **http://localhost:8080/docs**
+Open the docs at:
+
+- http://localhost:8080/docs
+- http://localhost:8080/health
 
 ---
 
-## 6. API Reference
+## Agent Reference
 
-Base URL: `http://localhost:8080`
+| Agent | Primary Path | Purpose |
+|---|---|---|
+| Orchestrator Agent | agent_verse/orchestrator_agent/agent.py | Classifies intent, validates role, and routes to the proper sub-agent. |
+| Chat Agent | agent_verse/chat_agent/agent.py | Answers grounded sales questions using the merchant database tools. |
+| Merchant Insight Agent | agent_verse/merchant_insight_agent/agent.py | Produces merchant-specific insight summaries and briefs. |
 
-| Method | Endpoint | Agent / Mode | Body / Query |
-|---|---|---|---|
-| GET  | `/health` | — | — |
-| POST | `/api/v1/chat` | Chat Agent | `{ "message", "user_id?", "user_role?" }` |
-| POST | `/api/v1/merchants/insight` | Insight (any mode) | `{ "merchant_name", "mode", "user_id?", "user_role?" }` |
-| GET  | `/api/v1/merchants/{name}/profile` | Insight · profile | `?user_id=&user_role=` |
-| GET  | `/api/v1/merchants/{name}/score` | Insight · score | `?user_id=&user_role=` |
-| GET  | `/api/v1/merchants/{name}/recommendation` | Insight · recommendation | `?user_id=&user_role=` |
-| GET  | `/api/v1/merchants/{name}/brief` | Insight · brief | `?user_id=&user_role=` |
+---
 
-If `user_id` / `user_role` are omitted, a seeded demo DSP is used (see `DEFAULT_USER`
-in `api/main.py`).
+## MCP Tools Reference
 
-### Example requests
+The Merchant DB MCP server in agent_plugin_verse/db_plugin/server.py exposes role-scoped database tools. All tools require a user identity and role and enforce access restrictions before returning data.
+
+| Tool | Description |
+|---|---|
+| get_merchant_details | Returns merchant profile data for the caller's allowed scope. |
+| get_merchant_score | Returns daily score, ranking, and signal information. |
+| get_merchant_recommendations | Returns recommendations tied to the merchant. |
+| get_merchant_visit_history | Returns recent visit history for the merchant. |
+| update_action | Updates recommendation status for an allowed DSP-owned merchant. |
+| search_data | Supports broader data search scenarios for the Chat Agent. |
+| get_audit | Returns administrative audit records when permitted. |
+
+---
+
+## Prompt System
+
+Prompt templates live under the agent-specific prompt directories:
+
+- agent_verse/chat_agent/prompt
+- agent_verse/merchant_insight_agent/prompt
+- agent_verse/orchestrator_agent/prompt
+
+The prompt factory loads text templates from these folders to keep agent instructions modular and maintainable.
+
+---
+
+## Configuration Reference
+
+| Setting | Path | Purpose |
+|---|---|---|
+| DATABASE_URL | .env | PostgreSQL connection string for the API and MCP server. |
+| GROQ_API_KEY | .env | Credentials for the Groq-compatible LLM endpoint. |
+| AGENT_LLM_MODEL | .env | Defaults the selected LLM model. |
+| LLM_CONFIG_FILE | .env | Points to config/llm_config.json. |
+| PLUGINS_CONFIG_FILE | .env | Points to config/plugin_config.json. |
+
+---
+
+## API Surface
+
+The FastAPI layer exposes a broad set of routers under api/routers:
+
+- Auth routes for login and token handling
+- Dashboard routes for summary data
+- Merchant routes for profile and insight retrieval
+- Recommendation routes for action updates
+- Chat routes for conversational interactions
+- Manager and admin routes for team and governance workflows
+
+Example requests:
 
 ```powershell
-# Health
 curl http://localhost:8080/health
+```
 
-# Pre-visit brief (GET)
-curl "http://localhost:8080/api/v1/merchants/LJ's%20Bakery/brief"
-
-# Insight with explicit mode + user context (POST)
-curl -X POST http://localhost:8080/api/v1/merchants/insight `
-  -H "Content-Type: application/json" `
-  -d '{ "merchant_name": "LJ''s Bakery", "mode": "score", "user_role": "DSP", "user_id": "294bc771-4a09-4cae-8958-2edc6f4b484d" }'
-
-# Ask SalesCoach (POST)
+```powershell
 curl -X POST http://localhost:8080/api/v1/chat `
   -H "Content-Type: application/json" `
-  -d '{ "message": "Which of my merchants need attention most right now?" }'
-```
-
-### Response shape
-
-```json
-// /api/v1/merchants/{name}/brief
-{ "agent": "merchant_insight", "mode": "brief", "merchant": "LJ's Bakery", "answer": "..." }
-
-// /api/v1/chat
-{ "agent": "chat", "answer": "..." }
+  -d '{"message":"Which merchants need attention most today?"}'
 ```
 
 ---
 
-## 7. Project Structure
+## Security and Secrets
 
-```
-api/
-  main.py                     # FastAPI app — independent per-agent endpoints
-agent_verse/
-  chat_agent/                 # Ask SalesCoach agent
-  merchant_insight_agent/     # Profile/Score/Recommendation/Brief (mode-driven)
-agent_plugin_verse/
-  db_plugin/server.py         # Merchant DB MCP server (RBAC-scoped tools)
-ai_model/
-  agent_llm_factory.py        # Builds the Groq ChatCompletion service
-config/
-  llm_config.json             # LLM provider config (Groq)
-  plugin_config.json          # MCP SSE URL
-  credential_manager.py       # Reads env vars
-db/
-  setup_and_seed.py           # Schema + synthetic data
-utils/                        # Logger, metrics
-```
+- Secrets should be stored in environment variables and never committed into source control.
+- The MCP server reads the database URL from DATABASE_URL and does not rely on embedded credentials.
+- Role-based access is enforced in the MCP layer before any merchant data is returned.
+- The repository ignores local environment files and other runtime artifacts.
 
 ---
 
-## 8. Troubleshooting
+## Dependencies
 
-| Symptom | Cause / Fix |
-|---|---|
-| `CERTIFICATE_VERIFY_FAILED` on LLM calls | Corporate TLS proxy. `truststore` is auto-injected in `agent_llm_factory.py` to use the OS cert store. Ensure `truststore` is installed. |
-| LLM returns HTML / `'str' object has no attribute 'usage'` | The network is intercepting `api.groq.com` (e.g. redirect to a sign-in page). Run on a network with direct Groq access. |
-| `db_plugin.sse_server_url not configured` | Start the MCP server (Terminal 1) and check `config/plugin_config.json`. |
-| `DATABASE_URL ... not set` | Set `DATABASE_URL` in `.env`. |
-| Activation blocked in PowerShell | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`, or call `.\.venv\Scripts\python.exe` directly. |
+The implementation relies on:
+
+- FastAPI for the REST API layer
+- Semantic Kernel for agent orchestration and tool integration
+- OpenAI-compatible client libraries for LLM access
+- psycopg2 for PostgreSQL connectivity
+- python-dotenv for environment loading
+- MCP/FastMCP for the merchant database tool server
 
 ---
 
-## 9. Security Notes
+## License
 
-- All MCP tools enforce row-level RBAC by `user_id` / `user_role`.
-- Do **not** commit `.env` (already in `.gitignore`).
-- The demo `DATABASE_URL` fallback in the MCP server and seed script is for local
-  demos only — replace and rotate before any shared/production use.
+This project is intended for internal and experimental use. Update the license header or repository policy if you plan to distribute it externally.
